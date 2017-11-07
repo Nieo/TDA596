@@ -17,10 +17,10 @@ from threading import  Thread # Thread Management
 #------------------------------------------------------------------------------------------------------
 
 # Global variables for HTML templates
-board_frontpage_footer_template = ""
-board_frontpage_header_template = ""
-boardcontents_template = ""
-entry_template = ""
+board_frontpage_footer_template = "server/board_frontpage_footer_template.html"
+board_frontpage_header_template = "server/board_frontpage_header_template.html"
+boardcontents_template = "server/boardcontents_template.html"
+entry_template = "server/entry_template.html"
 
 #------------------------------------------------------------------------------------------------------
 # Static variables definitions
@@ -48,21 +48,24 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, value):
-		# We add the value to the store
-		pass
+		self.current_key += 1
+		self.store[self.current_key] = value
+		return self.current_key
+
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
 	def modify_value_in_store(self,key,value):
-		# we modify a value in the store if it exists
-		pass
+		self.store[int(key)] = value
+		return key
+
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,key):
-		# we delete a value in the store if it exists
-		pass
+		del self.store[int(key)]
+		return key
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
-	def contact_vessel(self, vessel_ip, path, action, key, value):
+	def contact_vessel(self, vessel, path, action, key, value):
 		# the Boolean variable we will return
 		success = False
 		# The variables must be encoded in the URL format, through urllib.urlencode
@@ -146,20 +149,37 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_GET(self):
 		print("Receiving a GET on path %s" % self.path)
 		# Here, we should check which path was requested and call the right logic based on it
-		self.do_GET_Index()
+		if self.path == '/':
+			self.do_GET_Index()
+		elif self.path == '/board':
+			self.do_GET_Board()
+		else:
+			 self.wfile.write('error')
 #------------------------------------------------------------------------------------------------------
 # GET logic - specific path
 #------------------------------------------------------------------------------------------------------
 	def do_GET_Index(self):
 		# We set the response status code to 200 (OK)
 		self.set_HTTP_headers(200)
-		# We should do some real HTML here
-		html_reponse = "<html><head><title>Basic Skeleton</title></head><body>This is the basic HTML content when receiving a GET</body></html>"
-		#In practice, go over the entries list, 
-		#produce the boardcontents part, 
-		#then construct the full page by combining all the parts ...
+		header = open(board_frontpage_header_template).read()
+		footer = open(board_frontpage_footer_template).read()
+	
+		self.wfile.write(header + self.render_board() + footer)
+
+	def do_GET_Board(self):
+		self.set_HTTP_headers(200)
+		self.wfile.write(self.render_board())
+
+
+	def render_board(self):
+		boardcontents = open(boardcontents_template).read()
+		entry_t = open(entry_template).read()
 		
-		self.wfile.write(html_reponse)
+		entires = []
+		for key, value in self.server.store.items():
+			entires.append(entry_t % ('entries/'+str(key), key, value))
+
+		return boardcontents % ("title", "".join(entires))
 #------------------------------------------------------------------------------------------------------
 	# we might want some other functions
 #------------------------------------------------------------------------------------------------------
@@ -168,29 +188,51 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 	def do_POST(self):
 		print("Receiving a POST on %s" % self.path)
-		# Here, we should check which path was requested and call the right logic based on it
-		# We should also parse the data received
-		# and set the headers for the client
+		data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])))
+		print data
+		self.set_HTTP_headers(200)
+		if self.path == '/propagate':
+			value = data['value'][0] if 'value' in data.keys() else ''
+			self.update_store(data['action'][0],data['key'][0],value)
+		else:
+			action = ""
+			key = ""
+			value = ""
+			
+			if self.path == '/board':
+				action = 'add'
+				value = data['entry'][0]
+			elif self.path.startswith('/entries/'):
+				key = data['id'][0]
+				if data['delete'][0] == '1':
+					action = 'delete'
+				else:
+					action = 'modify'
+					value = data['entry'][0]	
+			else:
+				self.send_error(404)
 
-		# If we want to retransmit what we received to the other vessels
-		retransmit = False # Like this, we will just create infinite loops!
-		if retransmit:
-			# do_POST send the message only when the function finishes
-			# We must then create threads if we want to do some heavy computation
-			# 
-			# Random content
-			thread = Thread(target=self.server.propagate_value_to_vessels,args=("action", "key", "value") )
+			key = self.update_store(action, key, value)
+
+			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value))
 			# We kill the process if we kill the server
 			thread.daemon = True
 			# We start the thread
 			thread.start()
+
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
 	# We might want some functions here as well
 #------------------------------------------------------------------------------------------------------
-
-
+		
+	def update_store(self, action, key, value):
+		if action == 'add':
+			return self.server.add_value_to_store(value)
+		elif action == 'modify':
+			return self.server.modify_value_in_store(key, value)
+		elif action == 'delete':
+			return self.server.delete_value_in_store(key)
 
 
 
