@@ -3,8 +3,8 @@
 # TDA596 Labs - Server Skeleton
 # server/server.py
 # Input: Node_ID total_number_of_ID
-# Student Group:
-# Student names: John Doe & John Doe
+# Student Group: 8
+# Student names: Erik Pihl, Alex Tao
 #------------------------------------------------------------------------------------------------------
 # We import various libraries
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler # Socket specifically designed to handle HTTP requests
@@ -26,8 +26,6 @@ entry_template = "server/entry_template.html"
 # Static variables definitions
 PORT_NUMBER = 80
 #------------------------------------------------------------------------------------------------------
-
-
 
 
 #------------------------------------------------------------------------------------------------------
@@ -148,7 +146,6 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	# This function is called AUTOMATICALLY upon reception and is executed as a thread!
 	def do_GET(self):
 		print("Receiving a GET on path %s" % self.path)
-		# Here, we should check which path was requested and call the right logic based on it
 		if self.path == '/':
 			self.do_GET_Index()
 		elif self.path == '/board':
@@ -158,19 +155,23 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 # GET logic - specific path
 #------------------------------------------------------------------------------------------------------
-	def do_GET_Index(self):
-		# We set the response status code to 200 (OK)
+	
+  #Sends the html code of the first page back to the reqester upon request
+  def do_GET_Index(self):
 		self.set_HTTP_headers(200)
 		header = open(board_frontpage_header_template).read()
 		footer = open(board_frontpage_footer_template).read()
 	
 		self.wfile.write(header + self.render_board() + footer)
 
+  #Sends the board upon request  
 	def do_GET_Board(self):
 		self.set_HTTP_headers(200)
 		self.wfile.write(self.render_board())
 
-
+    
+  #Creates and combines and then returns
+  #all the elements of the the board section of the website
 	def render_board(self):
 		boardcontents = open(boardcontents_template).read()
 		entry_t = open(entry_template).read()
@@ -186,15 +187,23 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
 #------------------------------------------------------------------------------------------------------
-	def do_POST(self):
+	#Handles all post actions
+  def do_POST(self):
 		print("Receiving a POST on %s" % self.path)
 		data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])))
 		print data
 		self.set_HTTP_headers(200)
+    
+    #If the post path is /propagate, we retrieve and store the data
+    #/propagate is used when the POST request was invoked from another vessel
 		if self.path == '/propagate':
 			value = data['value'][0] if 'value' in data.keys() else ''
 			self.update_store(data['action'][0],data['key'][0],value)
-		else:
+		
+    #Otherwise it was called from a client. In that case we handle the separate
+    #cases on our own and propagate the request, along with the affected entry
+    #to all other vessels
+    else:
 			action = ""
 			key = ""
 			value = ""
@@ -226,6 +235,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	# We might want some functions here as well
 #------------------------------------------------------------------------------------------------------
 		
+  #Updates the store variable (which contains the values of all entries)  
 	def update_store(self, action, key, value):
 		if action == 'add':
 			return self.server.add_value_to_store(value)
