@@ -1,0 +1,21 @@
+Task 1 - Leader election
+Upon start a node sends a election message containg its source, vessel_id and random_id.
+Source is the creator of the first message. It is used to know when a message is returned to its creator.
+vessel_id is used to know the IP of the leader.
+random_id is used to know who will be leader.
+This message will be sent to the next node in numerical order.
+Each node that recieves the message chech if their random_id is larger than the current one.
+If it is they will replace it with their own random_id and vessel_id.
+When the source of the message receives it back it will choose the leader from the data in the message.
+
+All nodes start this process simultaneously. 
+
+Based on this every node creates 1 message that is progagated n times thrugh the network.
+This makes the overall cost of the leader election n^2.
+The time cost? for this solution is k. Since all nodes elect a leader at the same time.
+An alternative solution where only a single node does the election and then let the message go an extra round
+to let everyone know who is the leader. This solution would take 2k time before everyone knows the leader.
+
+
+
+Task 2 - Blackboard centralized

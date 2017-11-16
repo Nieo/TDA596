@@ -14,6 +14,8 @@ from httplib import HTTPConnection # Create a HTTP connection, as a client (for 
 from urllib import urlencode # Encode POST content into the HTTP header
 from codecs import open # Open a file
 from threading import  Thread # Thread Management
+import random
+import time
 #------------------------------------------------------------------------------------------------------
 
 # Global variables for HTML templates
@@ -45,6 +47,13 @@ class BlackboardServer(HTTPServer):
 		self.vessel_id = vessel_id
 		# The list of other vessels
 		self.vessels = vessel_list
+
+		self.id = random.randint(1,10000)
+		self.leader = 0
+		self.leader_id = 0
+		thread = Thread(target=self.start_leader_election)
+		thread.daemon = True
+		thread.start()
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, value):
@@ -108,10 +117,11 @@ class BlackboardServer(HTTPServer):
 				self.contact_vessel(vessel, path, action, key, value)		
 #------------------------------------------------------------------------------------------------------
 
-
-
-
-
+	def start_leader_election(self):
+		time.sleep(1)
+		vessel = "10.1.0.%s" % ((self.vessel_id % 10) + 1)
+		#Key is used for message source and value is the largest id found
+		self.contact_vessel(vessel, '/election', self.vessel_id, self.id, self.vessel_id)
 
 
 #------------------------------------------------------------------------------------------------------
@@ -163,8 +173,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.set_HTTP_headers(200)
 		header = open(board_frontpage_header_template).read()
 		footer = open(board_frontpage_footer_template).read()
-	
-		self.wfile.write(header + self.render_board() + footer)
+		
+		self.wfile.write(header + self.render_board() + footer % ('', self.server.leader, self.server.leader_id)) 
 
 	def do_GET_Board(self):
 		self.set_HTTP_headers(200)
@@ -194,6 +204,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		if self.path == '/propagate':
 			value = data['value'][0] if 'value' in data.keys() else ''
 			self.update_store(data['action'][0],data['key'][0],value)
+		elif self.path == '/election':
+			self.propagate_leader(data['action'][0],data['key'][0],data['value'][0])
 		else:
 			action = ""
 			key = ""
@@ -233,6 +245,25 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			return self.server.modify_value_in_store(key, value)
 		elif action == 'delete':
 			return self.server.delete_value_in_store(key)
+
+	def propagate_leader(self, action, key, value):
+		#This server was the source use the value as leader
+		print(action)
+		print(self.server.vessel_id) 
+		if int(action) == int(self.server.vessel_id):
+			self.server.leader_id = key
+			self.server.leader = "10.1.0.%s" % value
+			print("Elected %s as leader" % self.server.leader)
+		else:
+			if int(key) < int(self.server.id):
+				key = self.server.id
+				value = self.server.vessel_id
+			vessel = "10.1.0.%s" % ((self.server.vessel_id % 10) + 1)
+			thread = Thread(target=self.server.contact_vessel, args=(vessel, '/election', action, key, value))
+			thread.daemon = True
+			thread.start()
+
+
 
 
 
