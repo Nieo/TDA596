@@ -1,22 +1,24 @@
 Task 1 - Leader election
-Upon start a node sends a election message containg its source, vessel_id and random_id.
+The algorithm:
+Upon start a node sends a election message containg its source, random_id and vessel_id.
 Source is the creator of the first message. It is used to know when a message is returned to its creator.
+random_id is used to know who will be leader. It's a generated value between 1 - 10000.
 vessel_id is used to know the IP of the leader.
-random_id is used to know who will be leader.
 This message will be sent to the next node in numerical order.
-Each node that recieves the message chech if their random_id is larger than the current one.
-If it is they will replace it with their own random_id and vessel_id.
+The next node that recieves the message check if their random_id is larger than the current one. 
+If the two random_ids are the same, compare the ips of the two potential leaders. The ip with bigger numerical value wins.
+If it is they will replace it with their own random_id and vessel_id. Then it will propagate the message on to 
+the next node in numerical order, based on their ip. The node with the largest ip will send to the node with the smallest ip.
 When the source of the message receives it back it will choose the leader from the data in the message.
 
 All nodes start this process simultaneously. 
 
+The cost:
 Based on this every node creates 1 message that is progagated n times thrugh the network.
 This makes the overall cost of the leader election n^2.
 The time cost? for this solution is k. Since all nodes elect a leader at the same time.
 An alternative solution where only a single node does the election and then let the message go an extra round
 to let everyone know who is the leader. This solution would take 2k time before everyone knows the leader.
-
-
 
 Task 2 - Blackboard centralized
 If the leader dies we cannot add new entires
