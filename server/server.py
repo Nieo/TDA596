@@ -67,13 +67,15 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
 	def modify_value_in_store(self,key,value):
-		self.store[int(key)] = value
+		if int(key) in self.store:
+			self.store[int(key)] = value
 		return key
 
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,key):
-		del self.store[int(key)]
+		if int(key) in self.store:
+			del self.store[int(key)]
 		return key
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -130,16 +132,21 @@ class BlackboardServer(HTTPServer):
 
 	# Send a request to the leader to get the next unique id
 	def request_next_id(self):
-		try:
-			connection = HTTPConnection("%s:%d" % (self.leader, PORT_NUMBER), timeout=30)
-			connection.request("GET", "/nextid")
-			response = connection.getresponse()
-			return response.read()
-		except Exception as e:
-			print "Error while contacting %s" % self.leader
-			# printing the error given by Python
-			print(e)
-		return -1
+		# If this is leader get the key locally
+		if int(self.leader_id) == self.id:
+			return self.get_next_key()
+		# If not leader request the key from the leader
+		else: 
+			try:
+				connection = HTTPConnection("%s:%d" % (self.leader, PORT_NUMBER), timeout=30)
+				connection.request("GET", "/nextid")
+				response = connection.getresponse()
+				return response.read()
+			except Exception as e:
+				print "Error while contacting %s" % self.leader
+				# printing the error given by Python
+				print(e)
+			return -1
 
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
@@ -244,31 +251,10 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
     	#cases on our own and propagate the request, along with the affected entry
     	#to all other vessels
 		else:
-			action = ""
-			key = ""
-			value = ""
-			
 			if self.path == '/board': #Add new entry
-				action = 'add'
-				value = data['entry'][0]
-				# If this is leader get the key locally
-				if int(self.server.leader_id) == self.server.id:
-					key = self.server.get_next_key()
-				# If not leader request the key from the leader
-				else: 
-					key = self.server.request_next_id()
-				self.server.add_value_to_store(key, value)
+				(action, key, value) = self.add_entry(data['entry'][0])
 			elif self.path.startswith('/entries/'):
-				key = data['id'][0]
-				#If delete is set: delete value
-				if data['delete'][0] == '1':
-					action = 'delete'
-					self.server.delete_value_in_store(key)
-				#If delete is not set: update value
-				else:
-					action = 'modify'
-					value = data['entry'][0]
-					self.server.modify_value_in_store(key, value)
+				(action, key, value) = self.modify_or_delete(data['delete'][0],data['id'][0],data['entry'][0] )
 			else:
 				self.send_error(404)
 
@@ -284,6 +270,19 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	# We might want some functions here as well
 #------------------------------------------------------------------------------------------------------
 		
+	def add_entry(self, value):
+		key = self.server.request_next_id()
+		self.server.add_value_to_store(key, value)
+		return ('add', key, value)
+
+	def modify_or_delete(self, delete, key, value):
+		if delete == '1':
+			self.server.delete_value_in_store(key)
+			return ('delete', key, '')
+		else:
+			self.server.modify_value_in_store(key, value)
+			return ('modify', key, value)
+
   	#Updates the store variable (which contains the values of all entries)  
 	def update_store(self, action, key, value):
 		# print("%s,%s,%s,%d,%d", (action, key, value, self.server.leader_id, self.server.id))
@@ -295,21 +294,28 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			return self.server.delete_value_in_store(key)
 
 	#Sets the leader or continue sending election messages
-	def propagate_leader(self, action, key, value):
-		# action is used to store the vessel id of the origin of the message.
+	def propagate_leader(self, source, leader_id, leader_ip):
+		# source is used to store the vessel id of the origin of the message.
 		# If This server was the origin use message to set the leader
-		if int(action) == int(self.server.vessel_id):
-			self.server.leader_id = key
-			self.server.leader = "10.1.0.%s" % value
+		if int(source) == int(self.server.vessel_id):
+			self.server.leader_id = leader_id
+			self.server.leader = "10.1.0.%s" % leader_ip
 			print("Elected %s as leader" % self.server.leader)
 		else:
+			if int(leader_id) == int(self.server.id):
+				#If multiple vessels have the same id break the symetry using ip of vessels
+				if int(self.server.vessel_id) > int(leader_ip):
+					leader_id = self.server.id
+					leader_ip = self.server.vessel_id	
+			
 			#If this nodes id is greater than the id in the message
-			# update the message before sending it to the next node 
-			if int(key) < int(self.server.id):
-				key = self.server.id
-				value = self.server.vessel_id
+			# update the message before sending it to the next node
+			elif int(leader_id) < int(self.server.id):
+				leader_id = self.server.id
+				leader_ip = self.server.vessel_id
+
 			vessel = "10.1.0.%s" % ((self.server.vessel_id % 10) + 1)
-			thread = Thread(target=self.server.contact_vessel, args=(vessel, '/election', action, key, value))
+			thread = Thread(target=self.server.contact_vessel, args=(vessel, '/election', source, leader_id, leader_ip))
 			thread.daemon = True
 			thread.start()
 
