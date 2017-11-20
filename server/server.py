@@ -47,17 +47,22 @@ class BlackboardServer(HTTPServer):
 		self.vessels = vessel_list
 
 		self.id = random.randint(1,10000)
+		#IP of leader
 		self.leader = 0
-		self.leader_id = 0
+		self.leader_id = self.id
 		thread = Thread(target=self.start_leader_election)
 		thread.daemon = True
 		thread.start()
+
+
+	def get_next_key(self):
+		self.current_key +=1
+		return self.current_key	
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
-	def add_value_to_store(self, value):
-		self.current_key += 1
-		self.store[self.current_key] = value
-		return self.current_key
+	def add_value_to_store(self, key, value):
+		self.store[int(key)] = value
+		return key
 
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
@@ -114,13 +119,27 @@ class BlackboardServer(HTTPServer):
 				# Here, we do it only once
 				self.contact_vessel(vessel, path, action, key, value)		
 #------------------------------------------------------------------------------------------------------
-
+	# Waits for 1 second to let all nodes start correctly then start the leaderelection 
 	def start_leader_election(self):
 		time.sleep(1)
 		vessel = "10.1.0.%s" % ((self.vessel_id % 10) + 1)
-		#Key is used for message source and value is the largest id found
+		#Action is the vessel id to determine when the message have returned to is origin
+		#Key is current larges random id
+		#Value is the id (from the same node as key) used to get the ip of a node
 		self.contact_vessel(vessel, '/election', self.vessel_id, self.id, self.vessel_id)
 
+	# Send a request to the leader to get the next unique id
+	def request_next_id(self):
+		try:
+			connection = HTTPConnection("%s:%d" % (self.leader, PORT_NUMBER), timeout=30)
+			connection.request("GET", "/nextid")
+			response = connection.getresponse()
+			return response.read()
+		except Exception as e:
+			print "Error while contacting %s" % self.leader
+			# printing the error given by Python
+			print(e)
+		return -1
 
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
@@ -155,11 +174,13 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	# This function contains the logic executed when this server receives a GET request
 	# This function is called AUTOMATICALLY upon reception and is executed as a thread!
 	def do_GET(self):
-		print("Receiving a GET on path %s" % self.path)
+		# print("Receiving a GET on path %s" % self.path)
 		if self.path == '/':
 			self.do_GET_Index()
 		elif self.path == '/board':
 			self.do_GET_Board()
+		elif self.path == '/nextid':
+			self.do_GET_Next_id()
 		else:
 			 self.wfile.write('error')
 #------------------------------------------------------------------------------------------------------
@@ -191,6 +212,14 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			entires.append(entry_t % ('entries/'+str(key), key, value))
 
 		return boardcontents % ("title", "".join(entires))
+
+	#Returns the next unique id
+	def do_GET_Next_id(self):
+		print("GET /nextid")
+		self.set_HTTP_headers(200)
+		self.wfile.write(self.server.get_next_key())
+
+
 #------------------------------------------------------------------------------------------------------
 	# we might want some other functions
 #------------------------------------------------------------------------------------------------------
@@ -214,25 +243,34 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
     	#Otherwise it was called from a client. In that case we handle the separate
     	#cases on our own and propagate the request, along with the affected entry
     	#to all other vessels
-    	else:
+		else:
 			action = ""
 			key = ""
 			value = ""
 			
-			if self.path == '/board':
+			if self.path == '/board': #Add new entry
 				action = 'add'
 				value = data['entry'][0]
+				# If this is leader get the key locally
+				if int(self.server.leader_id) == self.server.id:
+					key = self.server.get_next_key()
+				# If not leader request the key from the leader
+				else: 
+					key = self.server.request_next_id()
+				self.server.add_value_to_store(key, value)
 			elif self.path.startswith('/entries/'):
 				key = data['id'][0]
+				#If delete is set: delete value
 				if data['delete'][0] == '1':
 					action = 'delete'
+					self.server.delete_value_in_store(key)
+				#If delete is not set: update value
 				else:
 					action = 'modify'
-					value = data['entry'][0]	
+					value = data['entry'][0]
+					self.server.modify_value_in_store(key, value)
 			else:
 				self.send_error(404)
-
-			key = self.update_store(action, key, value)
 
 			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value))
 			# We kill the process if we kill the server
@@ -246,24 +284,27 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	# We might want some functions here as well
 #------------------------------------------------------------------------------------------------------
 		
-  #Updates the store variable (which contains the values of all entries)  
+  	#Updates the store variable (which contains the values of all entries)  
 	def update_store(self, action, key, value):
+		# print("%s,%s,%s,%d,%d", (action, key, value, self.server.leader_id, self.server.id))
 		if action == 'add':
-			return self.server.add_value_to_store(value)
+			return self.server.add_value_to_store(key, value)
 		elif action == 'modify':
 			return self.server.modify_value_in_store(key, value)
 		elif action == 'delete':
 			return self.server.delete_value_in_store(key)
 
+	#Sets the leader or continue sending election messages
 	def propagate_leader(self, action, key, value):
-		#This server was the source use the value as leader
-		print(action)
-		print(self.server.vessel_id) 
+		# action is used to store the vessel id of the origin of the message.
+		# If This server was the origin use message to set the leader
 		if int(action) == int(self.server.vessel_id):
 			self.server.leader_id = key
 			self.server.leader = "10.1.0.%s" % value
 			print("Elected %s as leader" % self.server.leader)
 		else:
+			#If this nodes id is greater than the id in the message
+			# update the message before sending it to the next node 
 			if int(key) < int(self.server.id):
 				key = self.server.id
 				value = self.server.vessel_id
@@ -271,6 +312,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			thread = Thread(target=self.server.contact_vessel, args=(vessel, '/election', action, key, value))
 			thread.daemon = True
 			thread.start()
+
 
 
 

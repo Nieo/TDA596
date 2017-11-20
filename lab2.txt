@@ -19,3 +19,5 @@ to let everyone know who is the leader. This solution would take 2k time before 
 
 
 Task 2 - Blackboard centralized
+If the leader dies we cannot add new entires
+The leader needs to process every addition
