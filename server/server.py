@@ -38,10 +38,7 @@ class BlackboardServer(HTTPServer):
         # we create the dictionary of values
         self.store = {}
         self.sequence_number = 0
-        self.operations = []
-
-        # We keep a variable of the next id to insert
-        self.current_key = 0
+        self.delete_operations = []
         # our own ID (IP is 10.1.0.ID)
         self.vessel_id = int(vessel_id)
         # The list of other vessels
@@ -49,22 +46,17 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
     # We add a value received to the store
     def add_value_to_store(self, sequence_number, vessel_id, value):
-        vessel_id = int(vessel_id)
-        self.current_key += 1
-        if sequence_number > self.sequence_number:
-            self.store[self.current_key] = (value, sequence_number, vessel_id)
+        if self.sequence_number < sequence_number:
+            print('inc seq nr')
             self.sequence_number = sequence_number
-        else:
-            for i in range(self.current_key-1, -1, -1):
-                if i == 0: #reached front of list
-                    self.store[i+1] = (value, sequence_number, vessel_id)
-                    break
-                item = self.store[i]
-                if item[1] > sequence_number or (item[1] == sequence_number and int(item[2]) > int(vessel_id)):
-                    self.store[i+1] = item
-                else :
-                    self.store[i+1] = (value, sequence_number, vessel_id)
-                    break
+        key = str(sequence_number) + '-' + str(vessel_id)
+        for i in range(len(self.delete_operations)):
+            if self.delete_operations[i][0] == key and self.delete_operations[i][1] >= sequence_number and self.delete_operations[i][2] > vessel_id:
+                del self.delete_operations[i]
+                #If the value to be added is supposed to be deleted dont add it
+                return
+        self.store[key] = (value, sequence_number, vessel_id)
+
 
 #------------------------------------------------------------------------------------------------------
     # We modify a value received in the store
@@ -75,12 +67,11 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
     # We delete a value received from the store
     def delete_value_in_store(self, sequence_number, vessel_id, key):
-        key = int(key)
         self.sequence_number = max(sequence_number, self.sequence_number)
         if key in self.store:
             del self.store[key]
         else:
-            self.operations.append(('delete', sequence_number, vessel_id, key))
+            self.delete_operations.append((key, sequence_number, vessel_id))
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
     def contact_vessel(self, vessel, path, action, sequence_number, vessel_id, key, value):
@@ -130,7 +121,17 @@ class BlackboardServer(HTTPServer):
 
 
 
-
+# (value, sequence_number, vessel_id)
+def sorter(x, y):
+    if x[1][1] < y[1][1]:
+        return -1
+    elif x[1][1] > y[1][1]:
+        return 1
+    else:
+        if x[1][2] < y[1][2]:
+            return -1
+        else:
+            return 1
 
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
@@ -189,6 +190,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
         self.set_HTTP_headers(200)
         self.wfile.write(self.render_board())
 
+    
+
     #Creates and combines and then returns
     #all the elements of the the board section of the website
     def render_board(self):
@@ -196,7 +199,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
         entry_t = open(entry_template).read()
         
         entires = []
-        for key, value in self.server.store.items():
+        for key, value in sorted(self.server.store.items(), cmp = sorter):
             entires.append(entry_t % ('entries/'+str(key), key, value[0]))
 
         return boardcontents % ("title", "".join(entires))
@@ -217,7 +220,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
     #/propagate is used when the POST request was invoked from another vessel
         if self.path == '/propagate':
             value = data['value'][0] if 'value' in data.keys() else ''
-            key = int(data['key'][0]) if 'key' in data.keys() else ''
+            key = data['key'][0] if 'key' in data.keys() else ''
             self.update_store(data['action'][0], data['sequence_number'][0], data['vessel_id'][0], key, value)
         
     #Otherwise it was called from a client. In that case we handle the separate
