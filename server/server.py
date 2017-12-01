@@ -14,6 +14,7 @@ from httplib import HTTPConnection # Create a HTTP connection, as a client (for 
 from urllib import urlencode # Encode POST content into the HTTP header
 from codecs import open # Open a file
 from threading import  Thread # Thread Management
+from time import time
 #------------------------------------------------------------------------------------------------------
 
 # Global variables for HTML templates
@@ -39,6 +40,7 @@ class BlackboardServer(HTTPServer):
         self.store = {}
         self.sequence_number = 0
         self.delete_operations = []
+        self.modify_operations = []
         # our own ID (IP is 10.1.0.ID)
         self.vessel_id = int(vessel_id)
         # The list of other vessels
@@ -47,22 +49,39 @@ class BlackboardServer(HTTPServer):
     # We add a value received to the store
     def add_value_to_store(self, sequence_number, vessel_id, value):
         if self.sequence_number < sequence_number:
-            print('inc seq nr')
             self.sequence_number = sequence_number
         key = str(sequence_number) + '-' + str(vessel_id)
+        skip_add = False
         for i in range(len(self.delete_operations)):
-            if self.delete_operations[i][0] == key and self.delete_operations[i][1] >= sequence_number and self.delete_operations[i][2] > vessel_id:
-                del self.delete_operations[i]
-                #If the value to be added is supposed to be deleted dont add it
-                return
-        self.store[key] = (value, sequence_number, vessel_id)
+            if self.delete_operations[i][0] == key:
+                if self.delete_operations[i][1] > sequence_number or (self.delete_operations[i][1] == sequence_number and self.delete_operations[i][2] > vessel_id):
+                    del self.delete_operations[i]
+                    #If the value to be added is supposed to be deleted dont add it
+                    skip_add = True
+                else:
+                    del self.delete_operations[i]
+        # If key in modify_operations store the modified value instead
+        for i in range(len(self.modify_operations)):
+            if self.modify_operations[i][0] == key:
+                if self.modify_operations[i][1] > sequence_number or (self.modify_operations[i][1] == sequence_number and self.modify_operations[i][2] > vessel_id):
+                    self.store[key] = (self.modify_operations[i][3], self.modify_operations[i][1], self.modify_operations[i][2])
+                    del self.modify_operations[i]
+                    skip_add = True
+                else:
+                    del self.modify_operations[i]
+        if not skip_add:
+            self.store[key] = (value, sequence_number, vessel_id)
 
 
 #------------------------------------------------------------------------------------------------------
     # We modify a value received in the store
-    def modify_value_in_store(self,key,value):
-        self.store[int(key)] = value
-        return key
+    def modify_value_in_store(self, sequence_number, vessel_id, key, value):
+        self.sequence_number = max(sequence_number, self.sequence_number)
+        if key in self.store:
+            if sequence_number > self.store[key][1] or (sequence_number == self.store[key][1] and vessel_id > self.store[key][2]): 
+                self.store[key] = (value, sequence_number, vessel_id)
+        else:
+            self.modify_operations.append((key, sequence_number, vessel_id, value))
 
 #------------------------------------------------------------------------------------------------------
     # We delete a value received from the store
@@ -166,7 +185,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
     # This function contains the logic executed when this server receives a GET request
     # This function is called AUTOMATICALLY upon reception and is executed as a thread!
     def do_GET(self):
-        print("Receiving a GET on path %s" % self.path)
+        # print("Receiving a GET on path %s" % self.path)
         if self.path == '/':
             self.do_GET_Index()
         elif self.path == '/board':
@@ -211,9 +230,10 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
     #Handles all post actions
     def do_POST(self):
-        print("Receiving a POST on %s" % self.path)
+        print(time())
+         # print("Receiving a POST on %s" % self.path)
         data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])))
-        print data
+        #print data
         self.set_HTTP_headers(200)
     
     #If the post path is /propagate, we retrieve and store the data
@@ -243,6 +263,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
                 else:
                     action = 'modify'
                     value = data['entry'][0]    
+                    self.server.modify_value_in_store(self.server.sequence_number + 1, self.server.vessel_id, key, value)
             else:
                 self.send_error(404)
 
@@ -268,7 +289,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
         if action == 'add':
             return self.server.add_value_to_store(sequence_number, vessel_id, value)
         elif action == 'modify':
-            return self.server.modify_value_in_store(key, value)
+            return self.server.modify_value_in_store(sequence_number, vessel_id, key, value)
         elif action == 'delete':
             return self.server.delete_value_in_store(sequence_number, vessel_id, key)
 
