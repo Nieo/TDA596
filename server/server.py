@@ -143,12 +143,14 @@ class BlackboardServer(HTTPServer):
 
 # (value, sequence_number, vessel_id)
 def sorter(x, y):
-    if x[1][1] < y[1][1]:
+    x_key = x[0].split("-")
+    y_key = y[0].split("-")
+    if x_key[0] < y_key[0]:
         return -1
-    elif x[1][1] > y[1][1]:
+    elif x_key[0] > y_key[0]:
         return 1
     else:
-        if x[1][2] < y[1][2]:
+        if x_key[1] < y_key[1]:
             return -1
         else:
             return 1
