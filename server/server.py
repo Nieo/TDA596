@@ -34,119 +34,120 @@ PORT_NUMBER = 80
 #------------------------------------------------------------------------------------------------------
 class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
-	def __init__(self, server_address, handler, node_id, vessel_list):
-	# We call the super init
-		HTTPServer.__init__(self,server_address, handler)
-		# we create the dictionary of values
-		self.store = {}
-		# We keep a variable of the next id to insert
-		self.current_key = -1
-		# our own ID (IP is 10.1.0.ID)
-		self.vessel_id = vessel_id
-		# The list of other vessels
-		self.vessels = vessel_list
+    def __init__(self, server_address, handler, node_id, vessel_list):
+    # We call the super init
+        HTTPServer.__init__(self,server_address, handler)
+        # we create the dictionary of values
+        self.store = {}
+        # We keep a variable of the next id to insert
+        self.current_key = -1
+        # our own ID (IP is 10.1.0.ID)
+        self.vessel_id = vessel_id
+        # The list of other vessels
+        self.vessels = vessel_list
 
-		self.id = random.randint(1,10000)
-		#IP of leader
-		self.leader = 0
-		self.leader_id = self.id
-		thread = Thread(target=self.start_leader_election)
-		thread.daemon = True
-		thread.start()
+        self.id = random.randint(1,10000)
+        #IP of leader
+        self.leader = 0
+        self.leader_id = self.id
+        self.first_req = None
+        thread = Thread(target=self.start_leader_election)
+        thread.daemon = True
+        thread.start()
 
 
-	def get_next_key(self):
-		self.current_key +=1
-		return self.current_key	
+    def get_next_key(self):
+        self.current_key +=1
+        return self.current_key 
 #------------------------------------------------------------------------------------------------------
-	# We add a value received to the store
-	def add_value_to_store(self, key, value):
-		self.store[int(key)] = value
-		return key
-
-#------------------------------------------------------------------------------------------------------
-	# We modify a value received in the store
-	def modify_value_in_store(self,key,value):
-		if int(key) in self.store:
-			self.store[int(key)] = value
-		return key
+    # We add a value received to the store
+    def add_value_to_store(self, key, value):
+        self.store[int(key)] = value
+        return key
 
 #------------------------------------------------------------------------------------------------------
-	# We delete a value received from the store
-	def delete_value_in_store(self,key):
-		if int(key) in self.store:
-			del self.store[int(key)]
-		return key
+    # We modify a value received in the store
+    def modify_value_in_store(self,key,value):
+        if int(key) in self.store:
+            self.store[int(key)] = value
+        return key
+
+#------------------------------------------------------------------------------------------------------
+    # We delete a value received from the store
+    def delete_value_in_store(self,key):
+        if int(key) in self.store:
+            del self.store[int(key)]
+        return key
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
-	def contact_vessel(self, vessel, path, action, key, value):
-		# the Boolean variable we will return
-		success = False
-		# The variables must be encoded in the URL format, through urllib.urlencode
-		post_content = urlencode({'action': action, 'key': key, 'value': value})
-		# the HTTP header must contain the type of data we are transmitting, here URL encoded
-		headers = {"Content-type": "application/x-www-form-urlencoded"}
-		# We should try to catch errors when contacting the vessel
-		try:
-			# We contact vessel:PORT_NUMBER since we all use the same port
-			# We can set a timeout, after which the connection fails if nothing happened
-			connection = HTTPConnection("%s:%d" % (vessel, PORT_NUMBER), timeout = 30)
-			# We only use POST to send data (PUT and DELETE not supported)
-			action_type = "POST"
-			# We send the HTTP request
-			connection.request(action_type, path, post_content, headers)
-			# We retrieve the response
-			response = connection.getresponse()
-			# We want to check the status, the body should be empty
-			status = response.status
-			# If we receive a HTTP 200 - OK
-			if status == 200:
-				success = True
-		# We catch every possible exceptions
-		except Exception as e:
-			print "Error while contacting %s" % vessel
-			# printing the error given by Python
-			print(e)
+    def contact_vessel(self, vessel, path, action, key, value):
+        # the Boolean variable we will return
+        success = False
+        # The variables must be encoded in the URL format, through urllib.urlencode
+        post_content = urlencode({'action': action, 'key': key, 'value': value})
+        # the HTTP header must contain the type of data we are transmitting, here URL encoded
+        headers = {"Content-type": "application/x-www-form-urlencoded"}
+        # We should try to catch errors when contacting the vessel
+        try:
+            # We contact vessel:PORT_NUMBER since we all use the same port
+            # We can set a timeout, after which the connection fails if nothing happened
+            connection = HTTPConnection("%s:%d" % (vessel, PORT_NUMBER), timeout = 30)
+            # We only use POST to send data (PUT and DELETE not supported)
+            action_type = "POST"
+            # We send the HTTP request
+            connection.request(action_type, path, post_content, headers)
+            # We retrieve the response
+            response = connection.getresponse()
+            # We want to check the status, the body should be empty
+            status = response.status
+            # If we receive a HTTP 200 - OK
+            if status == 200:
+                success = True
+        # We catch every possible exceptions
+        except Exception as e:
+            print "Error while contacting %s" % vessel
+            # printing the error given by Python
+            print(e)
 
-		# we return if we succeeded or not
-		return success
+        # we return if we succeeded or not
+        return success
 #------------------------------------------------------------------------------------------------------
-	# We send a received value to all the other vessels of the system
-	def propagate_value_to_vessels(self, path, action, key, value):
-		# We iterate through the vessel list
-		for vessel in self.vessels:
-			# We should not send it to our own IP, or we would create an infinite loop of updates
-			if vessel != ("10.1.0.%s" % self.vessel_id):
-				# A good practice would be to try again if the request failed
-				# Here, we do it only once
-				self.contact_vessel(vessel, path, action, key, value)		
+    # We send a received value to all the other vessels of the system
+    def propagate_value_to_vessels(self, path, action, key, value):
+        # We iterate through the vessel list
+        for vessel in self.vessels:
+            # We should not send it to our own IP, or we would create an infinite loop of updates
+            if vessel != ("10.1.0.%s" % self.vessel_id):
+                # A good practice would be to try again if the request failed
+                # Here, we do it only once
+                self.contact_vessel(vessel, path, action, key, value)       
 #------------------------------------------------------------------------------------------------------
-	# Waits for 1 second to let all nodes start correctly then start the leaderelection 
-	def start_leader_election(self):
-		time.sleep(1)
-		vessel = "10.1.0.%s" % ((self.vessel_id % 10) + 1)
-		#Action is the vessel id to determine when the message have returned to is origin
-		#Key is current larges random id
-		#Value is the id (from the same node as key) used to get the ip of a node
-		self.contact_vessel(vessel, '/election', self.vessel_id, self.id, self.vessel_id)
+    # Waits for 1 second to let all nodes start correctly then start the leaderelection 
+    def start_leader_election(self):
+        time.sleep(4)
+        vessel = "10.1.0.%s" % ((self.vessel_id % len(self.vessels)) + 1)
+        #Action is the vessel id to determine when the message have returned to is origin
+        #Key is current larges random id
+        #Value is the id (from the same node as key) used to get the ip of a node
+        self.contact_vessel(vessel, '/election', self.vessel_id, self.id, self.vessel_id)
 
-	# Send a request to the leader to get the next unique id
-	def request_next_id(self):
-		# If this is leader get the key locally
-		if int(self.leader_id) == self.id:
-			return self.get_next_key()
-		# If not leader request the key from the leader
-		else: 
-			try:
-				connection = HTTPConnection("%s:%d" % (self.leader, PORT_NUMBER), timeout=30)
-				connection.request("GET", "/nextid")
-				response = connection.getresponse()
-				return response.read()
-			except Exception as e:
-				print "Error while contacting %s" % self.leader
-				# printing the error given by Python
-				print(e)
-			return -1
+    # Send a request to the leader to get the next unique id
+    def request_next_id(self):
+        # If this is leader get the key locally
+        if int(self.leader_id) == self.id:
+            return self.get_next_key()
+        # If not leader request the key from the leader
+        else: 
+            try:
+                connection = HTTPConnection("%s:%d" % (self.leader, PORT_NUMBER), timeout=30)
+                connection.request("GET", "/nextid")
+                response = connection.getresponse()
+                return response.read()
+            except Exception as e:
+                print "Error while contacting %s" % self.leader
+                # printing the error given by Python
+                print(e)
+            return -1
 
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
@@ -156,168 +157,173 @@ class BlackboardServer(HTTPServer):
 # Attributes of the server are SHARED accross all request hqndling/ threads!
 class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
-	# We fill the HTTP headers
-	def set_HTTP_headers(self, status_code = 200):
-		 # We set the response status code (200 if OK, something else otherwise)
-		self.send_response(status_code)
-		# We set the content type to HTML
-		self.send_header("Content-type","text/html")
-		# No more important headers, we can close them
-		self.end_headers()
+    # We fill the HTTP headers
+    def set_HTTP_headers(self, status_code = 200):
+         # We set the response status code (200 if OK, something else otherwise)
+        self.send_response(status_code)
+        # We set the content type to HTML
+        self.send_header("Content-type","text/html")
+        # No more important headers, we can close them
+        self.end_headers()
 #------------------------------------------------------------------------------------------------------
-	# a POST request must be parsed through urlparse.parse_QS, since the content is URL encoded
-	def parse_POST_request(self):
-		post_data = ""
-		# We need to parse the response, so we must know the length of the content
-		length = int(self.headers['Content-Length'])
-		# we can now parse the content using parse_qs
-		post_data = parse_qs(self.rfile.read(length), keep_blank_values=1)
-		# we return the data
-		return post_data
-#------------------------------------------------------------------------------------------------------	
+    # a POST request must be parsed through urlparse.parse_QS, since the content is URL encoded
+    def parse_POST_request(self):
+        post_data = ""
+        # We need to parse the response, so we must know the length of the content
+        length = int(self.headers['Content-Length'])
+        # we can now parse the content using parse_qs
+        post_data = parse_qs(self.rfile.read(length), keep_blank_values=1)
+        # we return the data
+        return post_data
+#------------------------------------------------------------------------------------------------------ 
 #------------------------------------------------------------------------------------------------------
 # Request handling - GET
 #------------------------------------------------------------------------------------------------------
-	# This function contains the logic executed when this server receives a GET request
-	# This function is called AUTOMATICALLY upon reception and is executed as a thread!
-	def do_GET(self):
-		# print("Receiving a GET on path %s" % self.path)
-		if self.path == '/':
-			self.do_GET_Index()
-		elif self.path == '/board':
-			self.do_GET_Board()
-		elif self.path == '/nextid':
-			self.do_GET_Next_id()
-		else:
-			 self.wfile.write('error')
+    # This function contains the logic executed when this server receives a GET request
+    # This function is called AUTOMATICALLY upon reception and is executed as a thread!
+    def do_GET(self):
+        # print("Receiving a GET on path %s" % self.path)
+        if self.path == '/':
+            self.do_GET_Index()
+        elif self.path == '/board':
+            self.do_GET_Board()
+        elif self.path == '/nextid':
+            self.do_GET_Next_id()
+        else:
+             self.wfile.write('error')
 #------------------------------------------------------------------------------------------------------
 # GET logic - specific path
 #------------------------------------------------------------------------------------------------------
-	
-	#Sends the html code of the first page back to the reqester upon request
-	def do_GET_Index(self):
-		self.set_HTTP_headers(200)
-		header = open(board_frontpage_header_template).read()
-		footer = open(board_frontpage_footer_template).read()
-		
-		self.wfile.write(header + self.render_board() + footer % ('', self.server.leader, self.server.leader_id)) 
+    
+    #Sends the html code of the first page back to the reqester upon request
+    def do_GET_Index(self):
+        self.set_HTTP_headers(200)
+        header = open(board_frontpage_header_template).read()
+        footer = open(board_frontpage_footer_template).read()
+        
+        self.wfile.write(header + self.render_board() + footer % ('', self.server.leader, self.server.leader_id)) 
 
-  	#Sends the board upon request  
-	def do_GET_Board(self):
-		self.set_HTTP_headers(200)
-		self.wfile.write(self.render_board())
+    #Sends the board upon request  
+    def do_GET_Board(self):
+        self.set_HTTP_headers(200)
+        self.wfile.write(self.render_board())
 
     
-  	#Creates and combines and then returns
-  	#all the elements of the the board section of the website
-	def render_board(self):
-		boardcontents = open(boardcontents_template).read()
-		entry_t = open(entry_template).read()
-		
-		entires = []
-		for key, value in self.server.store.items():
-			entires.append(entry_t % ('entries/'+str(key), key, value))
+    #Creates and combines and then returns
+    #all the elements of the the board section of the website
+    def render_board(self):
+        boardcontents = open(boardcontents_template).read()
+        entry_t = open(entry_template).read()
+        
+        entires = []
+        for key, value in self.server.store.items():
+            entires.append(entry_t % ('entries/'+str(key), key, value))
 
-		return boardcontents % ("title", "".join(entires))
+        return boardcontents % ("title", "".join(entires))
 
-	#Returns the next unique id
-	def do_GET_Next_id(self):
-		print("GET /nextid")
-		self.set_HTTP_headers(200)
-		self.wfile.write(self.server.get_next_key())
+    #Returns the next unique id
+    def do_GET_Next_id(self):
+        # print("GET /nextid")
+        self.set_HTTP_headers(200)
+        self.wfile.write(self.server.get_next_key())
 
 
 #------------------------------------------------------------------------------------------------------
-	# we might want some other functions
+    # we might want some other functions
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
 #------------------------------------------------------------------------------------------------------
-	#Handles all post actions
-  	def do_POST(self):
-		print("Receiving a POST on %s" % self.path)
-		data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])))
-		print data
-		self.set_HTTP_headers(200)
+    #Handles all post actions
+    def do_POST(self):
+        if self.path != '/election':
+            if self.server.first_req == None:
+                self.server.first_req = time.time()
+            else:
+                print(time.time() - self.server.first_req)
+        #print("Receiving a POST on %s" % self.path)
+        data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])))
+        # print data
+        self.set_HTTP_headers(200)
 
-    	#If the post path is /propagate, we retrieve and store the data
-    	#/propagate is used when the POST request was invoked from another vessel
-		if self.path == '/propagate':
-			value = data['value'][0] if 'value' in data.keys() else ''
-			self.update_store(data['action'][0],data['key'][0],value)
-		elif self.path == '/election':
-			self.propagate_leader(data['action'][0],data['key'][0],data['value'][0])
-    	#Otherwise it was called from a client. In that case we handle the separate
-    	#cases on our own and propagate the request, along with the affected entry
-    	#to all other vessels
-		else:
-			if self.path == '/board': #Add new entry
-				(action, key, value) = self.add_entry(data['entry'][0])
-			elif self.path.startswith('/entries/'):
-				(action, key, value) = self.modify_or_delete(data['delete'][0],data['id'][0],data['entry'][0] )
-			else:
-				self.send_error(404)
+        #If the post path is /propagate, we retrieve and store the data
+        #/propagate is used when the POST request was invoked from another vessel
+        if self.path == '/propagate':
+            value = data['value'][0] if 'value' in data.keys() else ''
+            self.update_store(data['action'][0],data['key'][0],value)
+        elif self.path == '/election':
+            self.propagate_leader(data['action'][0],data['key'][0],data['value'][0])
+        #Otherwise it was called from a client. In that case we handle the separate
+        #cases on our own and propagate the request, along with the affected entry
+        #to all other vessels
+        else:
+            if self.path == '/board': #Add new entry
+                (action, key, value) = self.add_entry(data['entry'][0])
+            elif self.path.startswith('/entries/'):
+                (action, key, value) = self.modify_or_delete(data['delete'][0],data['id'][0],data['entry'][0] )
+            else:
+                self.send_error(404)
 
-			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value))
-			# We kill the process if we kill the server
-			thread.daemon = True
-			# We start the thread
-			thread.start()
+            thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value))
+            # We kill the process if we kill the server
+            thread.daemon = True
+            # We start the thread
+            thread.start()
 
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
-	# We might want some functions here as well
+    # We might want some functions here as well
 #------------------------------------------------------------------------------------------------------
-		
-	def add_entry(self, value):
-		key = self.server.request_next_id()
-		self.server.add_value_to_store(key, value)
-		return ('add', key, value)
+        
+    def add_entry(self, value):
+        key = self.server.request_next_id()
+        self.server.add_value_to_store(key, value)
+        return ('add', key, value)
 
-	def modify_or_delete(self, delete, key, value):
-		if delete == '1':
-			self.server.delete_value_in_store(key)
-			return ('delete', key, '')
-		else:
-			self.server.modify_value_in_store(key, value)
-			return ('modify', key, value)
+    def modify_or_delete(self, delete, key, value):
+        if delete == '1':
+            self.server.delete_value_in_store(key)
+            return ('delete', key, '')
+        else:
+            self.server.modify_value_in_store(key, value)
+            return ('modify', key, value)
 
-  	#Updates the store variable (which contains the values of all entries)  
-	def update_store(self, action, key, value):
-		# print("%s,%s,%s,%d,%d", (action, key, value, self.server.leader_id, self.server.id))
-		if action == 'add':
-			return self.server.add_value_to_store(key, value)
-		elif action == 'modify':
-			return self.server.modify_value_in_store(key, value)
-		elif action == 'delete':
-			return self.server.delete_value_in_store(key)
+    #Updates the store variable (which contains the values of all entries)  
+    def update_store(self, action, key, value):
+        # print("%s,%s,%s,%d,%d", (action, key, value, self.server.leader_id, self.server.id))
+        if action == 'add':
+            return self.server.add_value_to_store(key, value)
+        elif action == 'modify':
+            return self.server.modify_value_in_store(key, value)
+        elif action == 'delete':
+            return self.server.delete_value_in_store(key)
 
-	#Sets the leader or continue sending election messages
-	def propagate_leader(self, source, leader_id, leader_ip):
-		# source is used to store the vessel id of the origin of the message.
-		# If This server was the origin use message to set the leader
-		if int(source) == int(self.server.vessel_id):
-			self.server.leader_id = leader_id
-			self.server.leader = "10.1.0.%s" % leader_ip
-			print("Elected %s as leader" % self.server.leader)
-		else:
-			if int(leader_id) == int(self.server.id):
-				#If multiple vessels have the same id break the symetry using ip of vessels
-				if int(self.server.vessel_id) > int(leader_ip):
-					leader_id = self.server.id
-					leader_ip = self.server.vessel_id	
-			
-			#If this nodes id is greater than the id in the message
-			# update the message before sending it to the next node
-			elif int(leader_id) < int(self.server.id):
-				leader_id = self.server.id
-				leader_ip = self.server.vessel_id
+    #Sets the leader or continue sending election messages
+    def propagate_leader(self, source, leader_id, leader_ip):
+        # source is used to store the vessel id of the origin of the message.
+        # If This server was the origin use message to set the leader
+        if int(source) == int(self.server.vessel_id):
+            self.server.leader_id = leader_id
+            self.server.leader = "10.1.0.%s" % leader_ip
+            print("Elected %s as leader" % self.server.leader)
+        else:
+            if int(leader_id) == int(self.server.id):
+                #If multiple vessels have the same id break the symetry using ip of vessels
+                if int(self.server.vessel_id) > int(leader_ip):
+                    leader_id = self.server.id
+                    leader_ip = self.server.vessel_id   
+            
+            #If this nodes id is greater than the id in the message
+            # update the message before sending it to the next node
+            elif int(leader_id) < int(self.server.id):
+                leader_id = self.server.id
+                leader_ip = self.server.vessel_id
 
-			vessel = "10.1.0.%s" % ((self.server.vessel_id % 10) + 1)
-			thread = Thread(target=self.server.contact_vessel, args=(vessel, '/election', source, leader_id, leader_ip))
-			thread.daemon = True
-			thread.start()
+            vessel = "10.1.0.%s" % ((self.server.vessel_id % len(self.server.vessels)) + 1)
+            thread = Thread(target=self.server.contact_vessel, args=(vessel, '/election', source, leader_id, leader_ip))
+            thread.daemon = True
+            thread.start()
 
 
 
@@ -329,28 +335,28 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 # Execute the code
 if __name__ == '__main__':
 
-	## read the templates from the corresponding html files
-	# .....
+    ## read the templates from the corresponding html files
+    # .....
 
-	vessel_list = []
-	vessel_id = 0
-	# Checking the arguments
-	if len(sys.argv) != 3: # 2 args, the script and the vessel name
-		print("Arguments: vessel_ID number_of_vessels")
-	else:
-		# We need to know the vessel IP
-		vessel_id = int(sys.argv[1])
-		# We need to write the other vessels IP, based on the knowledge of their number
-		for i in range(1, int(sys.argv[2])+1):
-			vessel_list.append("10.1.0.%d" % i) # We can add ourselves, we have a test in the propagation
+    vessel_list = []
+    vessel_id = 0
+    # Checking the arguments
+    if len(sys.argv) != 3: # 2 args, the script and the vessel name
+        print("Arguments: vessel_ID number_of_vessels")
+    else:
+        # We need to know the vessel IP
+        vessel_id = int(sys.argv[1])
+        # We need to write the other vessels IP, based on the knowledge of their number
+        for i in range(1, int(sys.argv[2])+1):
+            vessel_list.append("10.1.0.%d" % i) # We can add ourselves, we have a test in the propagation
 
-	# We launch a server
-	server = BlackboardServer(('', PORT_NUMBER), BlackboardRequestHandler, vessel_id, vessel_list)
-	print("Starting the server on port %d" % PORT_NUMBER)
+    # We launch a server
+    server = BlackboardServer(('', PORT_NUMBER), BlackboardRequestHandler, vessel_id, vessel_list)
+    print("Starting the server on port %d" % PORT_NUMBER)
 
-	try:
-		server.serve_forever()
-	except KeyboardInterrupt:
-		server.server_close()
-		print("Stopping Server")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.server_close()
+        print("Stopping Server")
 #------------------------------------------------------------------------------------------------------
