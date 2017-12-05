@@ -41,6 +41,7 @@ class BlackboardServer(HTTPServer):
         self.sequence_number = 0
         self.delete_operations = []
         self.modify_operations = []
+        self.first_req = None
         # our own ID (IP is 10.1.0.ID)
         self.vessel_id = int(vessel_id)
         # The list of other vessels
@@ -230,7 +231,11 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
     #Handles all post actions
     def do_POST(self):
-        print(time())
+        
+        if self.server.first_req == None:
+            self.server.first_req = time()
+        else:
+            print(time() - self.server.first_req)
          # print("Receiving a POST on %s" % self.path)
         data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])))
         #print data
