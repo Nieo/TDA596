@@ -42,10 +42,7 @@ def compute_byzantine_vote_round1(no_loyal,no_total,on_tie):
 
     result_vote = {}
     for i in range(1,no_loyal+1):
-        if i%2==0:
-            result_vote[str(i)] = not on_tie
-        else:
-            result_vote[str(i)] = on_tie
+        result_vote[str(i)] = not on_tie
     return result_vote
 
 #Compute byzantine votes for round 2, trying to swing the decision
@@ -64,13 +61,13 @@ def compute_byzantine_vote_round2(no_loyal,no_total,on_tie):
     for i in range(1,no_loyal+1):
         if i%2==0:
             obj = {}
-            for a in range(1, no_total+1):
-                obj[str(a)] = on_tie
+            for k in range(1, no_total+1):
+                obj[str(k)] = on_tie
             result_vectors[str(i)] = obj
         else:
             obj = {}
-            for a in range(1, no_total+1):
-                obj[str(a)] = not on_tie
+            for k in range(1, no_total+1):
+                obj[str(k)] = not on_tie
             result_vectors[str(i)] = obj
     return result_vectors
 
@@ -90,7 +87,7 @@ class BlackboardServer(HTTPServer):
         self.round = 0
         self.votes = [[],{},{}]
         self.byzantine = False
-        self.result = 'In progress...'
+        self.result = 'Waiting to start...'
 
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -184,6 +181,11 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
     
     #Sends the html code of the first page back to the reqester upon request
     def do_GET_Index(self):
+        #Reset voting on reload of index
+        self.server.votes = [[],{},{}]
+        self.server.byzantine = False
+        self.server.result = 'Waiting to start...'
+
         self.set_HTTP_headers(200)
         self.wfile.write(open(byzantine_template).read()) 
 
@@ -203,12 +205,23 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
         print("Receiving a POST on %s" % self.path)
         if self.path == '/vote/attack':
             self.sendVote(True)
+            self.set_HTTP_headers(200)
+            self.wfile.write("Voted attack")
+            return
         elif self.path == '/vote/retreat':
             self.sendVote(False)
+            self.set_HTTP_headers(200)
+            self.wfile.write("Voted retreat")
+            return
         elif self.path == '/vote/byzantine':
             self.server.byzantine = True
             self.byzantine(1)
-            self.server.result = "I'm byza"
+            if len(self.server.votes[1]) >= len(self.server.vessels)-1:
+                self.byzantine(2)
+            self.server.result = "I'm byzantine"
+            self.set_HTTP_headers(200)
+            self.wfile.write("I'm byzantine")
+            return
         elif self.path == '/propagate':
             data = self.parse_POST_request()
             iteration = int(data['iteration'])
@@ -216,6 +229,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
             if self.server.byzantine:
                 #Act byzantine
                 self.server.votes[iteration][str(data['source'])] = []
+                print(json.dumps(self.server.votes))
+                print("len %d, iter %d " % (len(self.server.votes[iteration]), iteration))
                 if iteration == 1 and len(self.server.votes[iteration]) >= len(self.server.vessels)-1:
                     self.byzantine(2)
             else:    
@@ -232,6 +247,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
                 elif iteration == 2 and len(self.server.votes[iteration]) >= len(self.server.vessels)-1:
                     print("Computing result" + json.dumps(self.server.votes[2]))
+                    self.server.votes[2][self.server.vessel_id] = self.server.votes[1]
                     #Compute result
                     result = []
                     print(json.dumps(self.server.votes[2][self.server.votes[2].keys()[0]]))
@@ -239,7 +255,9 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
                         false = 0
                         true = 0
                         for j in self.server.votes[2].keys():
-                            print("Keys %s, %s"%(j,i))
+                            if int(i) == int(j):
+                                continue
+                            print ("%s %s" %(i,j))
                             if self.server.votes[2][j][i]:
                                 true += 1
                             else:
@@ -252,10 +270,10 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
                             true += 1
                         else:
                             false += 1
-                    self.server.result = ("Attack! " if true > false else "Retreat! ") + ',' + json.dumps(self.server.votes) + json.dumps(result)
+                    self.server.result = ("Attack! " if false < true else "Retreat! ") + ',' + json.dumps(result)
 
         self.set_HTTP_headers(200)
-        self.wfile.write("ok")
+        self.wfile.write("")
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
@@ -264,6 +282,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
     def sendVote(self,attack):
         print("Sending vote command")
+        self.server.result = "In progress..."
         self.server.votes[1][str(self.server.vessel_id)] = attack        
         thread = Thread(target=self.server.propagate_value_to_vessels, args=("/propagate", 1, attack))
         thread.daemon = True
@@ -281,6 +300,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
             byzantine_votes = compute_byzantine_vote_round1(len(self.server.vessels)-1, len(self.server.vessels), False)
         else:
             byzantine_votes = compute_byzantine_vote_round2(len(self.server.vessels)-1, len(self.server.vessels), False)
+            print("Created byzantine2 votes " + json.dumps(byzantine_votes))
         i = 1
         for vessel in self.server.vessels:
             if vessel != ("10.1.0.%s" % self.server.vessel_id):
